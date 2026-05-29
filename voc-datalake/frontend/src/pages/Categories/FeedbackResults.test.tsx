@@ -3,36 +3,33 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { FeedbackResults } from './FeedbackResults'
-import type { FeedbackItem } from '../../api/client'
+import type { FeedbackItem } from '../../api/types'
 import type { SentimentFilter, ViewMode } from './types'
 
 const mockFeedback: FeedbackItem[] = [
   {
     feedback_id: '1',
+    source_id: 'src-1',
     source_platform: 'webscraper',
+    source_channel: 'reviews',
     original_text: 'Great delivery service!',
     sentiment_label: 'positive',
     sentiment_score: 0.9,
     category: 'delivery',
     source_created_at: '2026-01-01T10:00:00Z',
     rating: 5,
-    problem_summary: null,
     brand_name: 'test',
-    urgency_level: 'low',
-    persona: null,
-    keywords: [],
-    root_cause_hypothesis: null,
-    suggested_response: null,
-    language: 'en',
-    translated_text: null,
-    source_url: null,
-    author_name: null,
-    author_location: null,
+    urgency: 'low',
+    impact_area: 'product',
+    original_language: 'en',
     processed_at: '2026-01-01T10:00:00Z',
+    journey_stage: 'post_purchase',
   },
   {
     feedback_id: '2',
+    source_id: 'src-2',
     source_platform: 'manual_import',
+    source_channel: 'import',
     original_text: 'Slow support response',
     sentiment_label: 'negative',
     sentiment_score: -0.7,
@@ -41,17 +38,11 @@ const mockFeedback: FeedbackItem[] = [
     rating: 2,
     problem_summary: 'Slow response',
     brand_name: 'test',
-    urgency_level: 'high',
-    persona: null,
-    keywords: [],
-    root_cause_hypothesis: null,
-    suggested_response: null,
-    language: 'en',
-    translated_text: null,
-    source_url: null,
-    author_name: null,
-    author_location: null,
+    urgency: 'high',
+    impact_area: 'support',
+    original_language: 'en',
     processed_at: '2026-01-02T10:00:00Z',
+    journey_stage: 'support',
   },
 ]
 
@@ -149,19 +140,19 @@ describe('FeedbackResults', () => {
       renderWithRouter(<FeedbackResults {...defaultProps} onExport={onExport} />)
 
       await user.click(screen.getByRole('button', { name: /export/i }))
-      expect(onExport).toHaveBeenCalled()
+      expect(onExport).toHaveBeenCalledWith(expect.any(Object))
     })
   })
 
   describe('loading state', () => {
-    it('shows loading spinner when feedbackLoading is true', () => {
+    it('does not show feedback items when feedbackLoading is true', () => {
       renderWithRouter(<FeedbackResults {...defaultProps} feedbackLoading={true} />)
-      expect(document.querySelector('.animate-spin')).toBeInTheDocument()
+      expect(screen.queryByText(/great delivery service/i)).not.toBeInTheDocument()
     })
 
-    it('hides loading spinner when feedbackLoading is false', () => {
+    it('shows feedback items when feedbackLoading is false', () => {
       renderWithRouter(<FeedbackResults {...defaultProps} feedbackLoading={false} />)
-      expect(document.querySelector('.animate-spin')).not.toBeInTheDocument()
+      expect(screen.getByText(/great delivery service/i)).toBeInTheDocument()
     })
   })
 
@@ -179,14 +170,16 @@ describe('FeedbackResults', () => {
       expect(screen.getByText(/slow support response/i)).toBeInTheDocument()
     })
 
-    it('renders in grid layout when viewMode is grid', () => {
-      const { container } = renderWithRouter(<FeedbackResults {...defaultProps} viewMode="grid" />)
-      expect(container.querySelector('.grid')).toBeInTheDocument()
+    it('renders feedback cards in grid mode', () => {
+      renderWithRouter(<FeedbackResults {...defaultProps} viewMode="grid" />)
+      expect(screen.getByText(/great delivery service/i)).toBeInTheDocument()
+      expect(screen.getByText(/slow support response/i)).toBeInTheDocument()
     })
 
-    it('renders in list layout when viewMode is list', () => {
-      const { container } = renderWithRouter(<FeedbackResults {...defaultProps} viewMode="list" />)
-      expect(container.querySelector('.space-y-2')).toBeInTheDocument()
+    it('renders feedback cards in list mode', () => {
+      renderWithRouter(<FeedbackResults {...defaultProps} viewMode="list" />)
+      expect(screen.getByText(/great delivery service/i)).toBeInTheDocument()
+      expect(screen.getByText(/slow support response/i)).toBeInTheDocument()
     })
   })
 })

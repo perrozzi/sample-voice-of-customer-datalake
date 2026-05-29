@@ -469,3 +469,39 @@ export interface LogsSummary {
   total_validation_failures: number
   total_processing_errors: number
 }
+
+/**
+ * A problem (category × subcategory × text) that has been marked as resolved
+ * by an admin so that ProblemAnalysis can hide it from the active list.
+ */
+export interface ResolvedProblem {
+  problem_id: string
+  category: string
+  subcategory: string
+  problem_text: string
+  resolved_at: string
+  resolved_by: string
+}
+
+/**
+ * Metadata for an API token used by external integrations to ingest feedback.
+ * The raw token value is only returned once at creation time
+ * (see CreateApiTokenResponse).
+ */
+export interface ApiToken {
+  token_id: string
+  name: string
+  scope: 'read' | 'read-write'
+  created_at: string
+  last_used_at?: string
+  project_id: string
+}
+
+/** Response when creating an API token; `token` is the only time the raw value is returned. */
+export interface CreateApiTokenResponse {
+  success: boolean
+  token: string
+  token_id: string
+  name: string
+  message?: string
+}

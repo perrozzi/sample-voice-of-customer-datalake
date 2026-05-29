@@ -24,6 +24,7 @@ import type {
   ProcessingLogEntry,
   ScraperLogEntry,
   LogsSummary,
+  ResolvedProblem,
 } from './types'
 
 // Re-export all types for backward compatibility
@@ -51,6 +52,7 @@ export type {
   ProcessingLogEntry,
   ScraperLogEntry,
   LogsSummary,
+  ResolvedProblem,
 } from './types'
 export type { ProjectJob, ProjectDocument, ProjectDetail, ChatMessage, ChatConversation } from './types'
 
@@ -160,7 +162,22 @@ export const api = {
     const searchParams = buildSearchParams(params)
     return fetchApi<EntitiesResponse>(`/feedback/entities?${searchParams}`)
   },
-  
+
+  // Resolved problems (admin marks a problem cluster as handled so ProblemAnalysis can hide it)
+  getResolvedProblems: () =>
+    fetchApi<{ resolved: ResolvedProblem[] }>('/feedback/problems/resolved'),
+
+  resolveProblem: (problemId: string, data: { category: string; subcategory: string; problem_text: string }) =>
+    fetchApi<{ success: boolean; problem_id: string }>(`/feedback/problems/${problemId}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  unresolveProblem: (problemId: string) =>
+    fetchApi<{ success: boolean; problem_id: string }>(`/feedback/problems/${problemId}/resolve`, {
+      method: 'DELETE',
+    }),
+
   // Metrics
   getSummary: (days: number, source?: string) => {
     const params = new URLSearchParams({ days: String(days) })
@@ -255,6 +272,16 @@ export const api = {
     body: JSON.stringify(settings)
   }),
 
+  // Review settings (primary language used by review-translation pipeline)
+  getReviewSettings: () =>
+    fetchApi<{ primary_language: string }>('/settings/review'),
+
+  saveReviewSettings: (settings: { primary_language: string }) =>
+    fetchApi<{ success: boolean; message: string; settings: typeof settings }>('/settings/review', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    }),
+
   // Categories Configuration
   getCategoriesConfig: () => fetchApi<{ 
     categories: Array<{
@@ -300,7 +327,12 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(credentials)
     }),
-  
+
+  // Read-only fetch of stored credentials by key list. Returns Record<key, value>
+  // for the requested keys (missing keys yield empty string).
+  getIntegrationCredentials: (source: string, keys: string[]) =>
+    fetchApi<Record<string, string>>(`/integrations/${source}/credentials?keys=${keys.join(',')}`),
+
   testIntegration: (source: string) => 
     fetchApi<{ success: boolean; message?: string; error?: string; details?: Record<string, unknown> }>(`/integrations/${source}/test`, {
       method: 'POST'
