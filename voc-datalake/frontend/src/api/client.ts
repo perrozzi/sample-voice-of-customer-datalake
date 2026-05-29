@@ -2,6 +2,8 @@ import { authService } from '../services/auth'
 import { getBaseUrl, getAuthHeaders, getDaysFromRange } from './baseUrl'
 import type {
   FeedbackItem,
+  FeedbackListParams,
+  FeedbackListResponse,
   MetricsSummary,
   SentimentBreakdown,
   CategoryBreakdown,
@@ -27,6 +29,8 @@ import type {
 // Re-export all types for backward compatibility
 export type {
   FeedbackItem,
+  FeedbackListParams,
+  FeedbackListResponse,
   MetricsSummary,
   SentimentBreakdown,
   CategoryBreakdown,
@@ -114,8 +118,10 @@ export async function fetchApi<T>(endpoint: string, options?: RequestInit): Prom
   throw new Error(`API Error: ${response.status}`)
 }
 
-// Helper to build URLSearchParams from an object, filtering out undefined/null values
-function buildSearchParams(params: Record<string, string | number | boolean | undefined | null>): URLSearchParams {
+// Helper to build URLSearchParams from an object, filtering out undefined/null values.
+// Accepts any object so domain interfaces (e.g. FeedbackListParams) can be passed
+// without requiring an index signature on the type.
+export function buildSearchParams(params: object): URLSearchParams {
   const searchParams = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
     if (value != null) {
@@ -127,9 +133,9 @@ function buildSearchParams(params: Record<string, string | number | boolean | un
 
 export const api = {
   // Feedback
-  getFeedback: (params: { days?: number; source?: string; category?: string; sentiment?: string; limit?: number }) => {
+  getFeedback: (params: FeedbackListParams) => {
     const searchParams = buildSearchParams(params)
-    return fetchApi<{ count: number; items: FeedbackItem[] }>(`/feedback?${searchParams}`)
+    return fetchApi<FeedbackListResponse>(`/feedback?${searchParams}`)
   },
   
   getFeedbackById: (id: string) => fetchApi<FeedbackItem>(`/feedback/${id}`),
