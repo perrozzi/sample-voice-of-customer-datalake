@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable security/detect-non-literal-fs-filename -- test script with controlled paths */
 
 /**
  * Regression tests for i18n translation quality.
@@ -112,4 +113,5 @@ test('fix-i18n.mjs NAMESPACES includes projectDetail', () => {
 })
 
 console.log(`\ni18n regression tests: ${passed} passed, ${failed} failed`)
+/* eslint-enable security/detect-non-literal-fs-filename */
 process.exit(failed > 0 ? 1 : 0)

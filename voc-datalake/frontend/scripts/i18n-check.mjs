@@ -21,6 +21,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
 import { resolve, join, extname, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+/* eslint-disable security/detect-non-literal-fs-filename -- Build script with controlled paths from known base directories */
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const LOCALES_DIR = resolve(__dirname, '..', 'public', 'locales')
@@ -118,6 +119,7 @@ function extractKeysFromSource(files) {
     // Match t('...') and t("...")
     // Handles: t('key'), t('key', ...), t(`key`)
     // Extract t('key') and t('key', { ns: 'foo' }) calls
+    // eslint-disable-next-line security/detect-unsafe-regex -- Bounded by line-level input; no user-controlled data
     const tCallRegex = /\bt\(\s*['"`]([^'"`]+)['"`](?:\s*,\s*\{[^}]*?ns:\s*['"](\w+)['"])?/g
     let match
     while ((match = tCallRegex.exec(content)) !== null) {
@@ -395,5 +397,6 @@ if (untranslatedPages.length > 0 || untranslatedComponents.length > 0) {
   }
 }
 
+/* eslint-enable security/detect-non-literal-fs-filename */
 
 process.exit(hasProblems ? 1 : 0)

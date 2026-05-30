@@ -262,6 +262,7 @@ function ScrapersContent({
   )
 }
 
+// eslint-disable-next-line complexity
 export default function Scrapers() {
   const { t } = useTranslation('scrapers')
   const { config } = useConfigStore()

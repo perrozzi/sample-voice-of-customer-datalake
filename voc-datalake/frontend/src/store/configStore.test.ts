@@ -10,7 +10,7 @@ vi.mock('../runtimeConfig', () => ({
   isConfigLoaded: vi.fn(() => false),
   getRuntimeConfig: vi.fn(() => ({
     apiEndpoint: 'https://runtime-api.example.com',
-    cognito: { userPoolId: 'pool-123', clientId: 'client-123', region: 'us-east-1' }
+    cognito: { userPoolId: 'pool-123', clientId: 'client-123', region: 'us-east-1', identityPoolId: 'us-east-1:test-pool-id' }
   }))
 }))
 
@@ -24,11 +24,6 @@ describe('configStore', () => {
         brandHandles: [],
         hashtags: [],
         urlsToTrack: [],
-        sources: {
-          webscraper: { enabled: false, schedule: 'rate(5 minutes)', credentials: {} },
-          manual_import: { enabled: false, schedule: 'rate(5 minutes)', credentials: {} },
-          s3_import: { enabled: false, schedule: 'rate(5 minutes)', credentials: {} },
-        },
       },
       timeRange: '7d',
       customDateRange: null,
@@ -62,7 +57,7 @@ describe('configStore', () => {
       setConfig({ brandHandles: ['@brand', '@company'] })
 
       const { config } = useConfigStore.getState()
-      expect(config.brandHandles).toEqual(['@brand', '@company'])
+      expect(config.brandHandles).toStrictEqual(['@brand', '@company'])
     })
   })
 
@@ -104,7 +99,7 @@ describe('configStore', () => {
 
       const { customDateRange, timeRange } = useConfigStore.getState()
       expect(timeRange).toBe('custom')
-      expect(customDateRange).toEqual({ start: '2025-01-01', end: '2025-01-31' })
+      expect(customDateRange).toStrictEqual({ start: '2025-01-01', end: '2025-01-31' })
     })
 
     it('clears custom date range when set to null', () => {
@@ -124,7 +119,7 @@ describe('configStore', () => {
       vi.mocked(runtimeConfig.isConfigLoaded).mockReturnValue(true)
       vi.mocked(runtimeConfig.getRuntimeConfig).mockReturnValue({
         apiEndpoint: 'https://runtime-api.example.com',
-        cognito: { userPoolId: 'pool-123', clientId: 'client-123', region: 'us-east-1' }
+        cognito: { userPoolId: 'pool-123', clientId: 'client-123', region: 'us-east-1', identityPoolId: 'us-east-1:test-pool-id' }
       })
 
       const { syncWithRuntimeConfig } = useConfigStore.getState()
@@ -149,7 +144,7 @@ describe('configStore', () => {
       vi.mocked(runtimeConfig.isConfigLoaded).mockReturnValue(true)
       vi.mocked(runtimeConfig.getRuntimeConfig).mockReturnValue({
         apiEndpoint: 'https://same-api.example.com',
-        cognito: { userPoolId: 'pool-123', clientId: 'client-123', region: 'us-east-1' }
+        cognito: { userPoolId: 'pool-123', clientId: 'client-123', region: 'us-east-1', identityPoolId: 'us-east-1:test-pool-id' }
       })
 
       const { syncWithRuntimeConfig, setConfig } = useConfigStore.getState()

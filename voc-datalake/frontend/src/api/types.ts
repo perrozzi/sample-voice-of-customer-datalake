@@ -27,67 +27,20 @@ export interface FeedbackItem {
   persona_type?: string
 }
 
-/**
- * Filter shape shared by feedback list endpoints.
- *
- * Used by `/feedback`, `/feedback/urgent`, and `/feedback/search`. Each filter
- * narrows the result set independently; combine them via AND on the server.
- */
-export interface FeedbackFilters {
-  days?: number
-  source?: string
-  category?: string
-  sentiment?: string
-}
-
-/**
- * Query parameters for the paginated `/feedback` list endpoint.
- *
- * Pagination is offset-based within a candidate window (see backend
- * `list_feedback` for window semantics). `offset` of 0 is the first page.
- */
-export interface FeedbackListParams extends FeedbackFilters {
-  limit?: number
-  offset?: number
-}
-
-/**
- * Response envelope for the paginated `/feedback` list endpoint.
- *
- * - `count` is the size of the returned page (0..limit).
- * - `total` is the size of the filtered candidate window — `hasMore` should be
- *   computed as `loaded < total`, not `count < limit`.
- * - `offset` and `limit` echo the applied request parameters.
- * - `is_partial_window` is true when the candidate window was truncated by the
- *   backend's MAX_FEEDBACK_OFFSET cap, meaning more matching records may exist
- *   beyond what was counted. UI should treat `total` as a lower bound in that
- *   case.
- */
-export interface FeedbackListResponse {
-  count: number
-  total: number
-  offset: number
-  limit: number
-  is_partial_window: boolean
-  items: FeedbackItem[]
-}
-
-/**
- * Response envelope for `/feedback/urgent`. Not paginated — returns up to
- * `limit` items in one shot.
- */
-export interface UrgentFeedbackResponse {
-  count: number
-  items: FeedbackItem[]
-}
-
 export interface MetricsSummary {
   period_days: number
   total_feedback: number
   avg_sentiment: number
   urgent_count: number
-  daily_totals: { date: string; count: number }[]
-  daily_sentiment: { date: string; avg_sentiment: number; count: number }[]
+  daily_totals: {
+    date: string;
+    count: number
+  }[]
+  daily_sentiment: {
+    date: string;
+    avg_sentiment: number;
+    count: number
+  }[]
 }
 
 export interface SentimentBreakdown {
@@ -167,62 +120,6 @@ export interface ScraperTemplate {
   config: Partial<ScraperConfig>
 }
 
-export interface ChatMessage {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  sources?: FeedbackItem[]
-  timestamp: string
-  filters?: {
-    source?: string
-    category?: string
-    sentiment?: string
-    tags?: string[]
-  }
-}
-
-export interface ChatConversation {
-  id: string
-  title: string
-  messages: ChatMessage[]
-  filters: {
-    source?: string
-    category?: string
-    sentiment?: string
-    tags?: string[]
-  }
-  createdAt: string
-  updatedAt: string
-}
-
-export interface ChatMessage {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  sources?: FeedbackItem[]
-  timestamp: string
-  filters?: {
-    source?: string
-    category?: string
-    sentiment?: string
-    tags?: string[]
-  }
-}
-
-export interface ChatConversation {
-  id: string
-  title: string
-  messages: ChatMessage[]
-  filters: {
-    source?: string
-    category?: string
-    sentiment?: string
-    tags?: string[]
-  }
-  createdAt: string
-  updatedAt: string
-}
-
 export interface EntitiesResponse {
   period_days: number
   feedback_count: number
@@ -264,28 +161,28 @@ export interface ProjectPersona {
   avatar_url?: string
   avatar_prompt?: string
   // Section 1: Identity & Demographics
-  identity?: { 
+  identity?: {
     age_range?: string
     location?: string
     occupation?: string
     income_bracket?: string
     education?: string
     family_status?: string
-    bio?: string 
+    bio?: string
   }
   // Section 2: Goals & Motivations
-  goals_motivations?: { 
+  goals_motivations?: {
     primary_goal?: string
     secondary_goals?: string[]
     success_definition?: string
-    underlying_motivations?: string[] 
+    underlying_motivations?: string[]
   }
   // Section 3: Pain Points & Frustrations
-  pain_points?: { 
+  pain_points?: {
     current_challenges?: string[]
     blockers?: string[]
     workarounds?: string[]
-    emotional_impact?: string 
+    emotional_impact?: string
   }
   // Section 4: Behaviors & Habits
   behaviors?: {
@@ -296,7 +193,7 @@ export interface ProjectPersona {
     decision_style?: string
   }
   // Section 5: Context & Environment
-  context_environment?: { 
+  context_environment?: {
     usage_context?: string
     devices?: string[]
     time_constraints?: string
@@ -304,16 +201,25 @@ export interface ProjectPersona {
     influencers?: string[]
   }
   // Section 6: Representative Quotes
-  quotes?: Array<{ text: string; context?: string }>
+  quotes?: Array<{
+    text: string;
+    context?: string
+  }>
   // Section 7: Scenario/User Story
-  scenario?: { 
+  scenario?: {
     title?: string
     narrative?: string
     trigger?: string
-    outcome?: string 
+    outcome?: string
   }
   // Section 8: Research Notes
-  research_notes?: Array<string | { note_id?: string; text: string; author?: string; created_at?: string; tags?: string[] }>
+  research_notes?: Array<string | {
+    note_id?: string;
+    text: string;
+    author?: string;
+    created_at?: string;
+    tags?: string[]
+  }>
   // Metadata
   supporting_evidence?: string[]
   source_breakdown?: Record<string, number>
@@ -372,8 +278,8 @@ export interface S3ImportFile {
   status: 'pending' | 'processed'
 }
 
-export interface FeedbackFormConfig {
-  enabled: boolean
+/** Shared form configuration fields used by both FeedbackFormConfig and FeedbackForm. */
+interface FeedbackFormFields {
   title: string
   description: string
   question: string
@@ -391,32 +297,23 @@ export interface FeedbackFormConfig {
   }
   collect_email: boolean
   collect_name: boolean
-  custom_fields: Array<{ id: string; label: string; type: string; required: boolean }>
+  custom_fields: Array<{
+    id: string;
+    label: string;
+    type: string;
+    required: boolean
+  }>
+}
+
+export interface FeedbackFormConfig extends FeedbackFormFields {
+  enabled: boolean
   brand_name: string
 }
 
-export interface FeedbackForm {
+export interface FeedbackForm extends FeedbackFormFields {
   form_id: string
   name: string
   enabled: boolean
-  title: string
-  description: string
-  question: string
-  placeholder: string
-  rating_enabled: boolean
-  rating_type: 'stars' | 'numeric' | 'emoji'
-  rating_max: number
-  submit_button_text: string
-  success_message: string
-  theme: {
-    primary_color: string
-    background_color: string
-    text_color: string
-    border_radius: string
-  }
-  collect_email: boolean
-  collect_name: boolean
-  custom_fields: Array<{ id: string; label: string; type: string; required: boolean }>
   category: string
   subcategory: string
   created_at: string
@@ -472,10 +369,6 @@ export interface LogsSummary {
   total_processing_errors: number
 }
 
-/**
- * A problem (category × subcategory × text) that has been marked as resolved
- * by an admin so that ProblemAnalysis can hide it from the active list.
- */
 export interface ResolvedProblem {
   problem_id: string
   category: string
@@ -485,11 +378,7 @@ export interface ResolvedProblem {
   resolved_by: string
 }
 
-/**
- * Metadata for an API token used by external integrations to ingest feedback.
- * The raw token value is only returned once at creation time
- * (see CreateApiTokenResponse).
- */
+// API Token types
 export interface ApiToken {
   token_id: string
   name: string
@@ -499,7 +388,6 @@ export interface ApiToken {
   project_id: string
 }
 
-/** Response when creating an API token; `token` is the only time the raw value is returned. */
 export interface CreateApiTokenResponse {
   success: boolean
   token: string

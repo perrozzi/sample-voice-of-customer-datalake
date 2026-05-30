@@ -138,7 +138,7 @@ export function openPrintWindow(options: PrintOptions): Window | null {
 `
 
   // Using document.write is the standard way to populate a new window's document
-  // eslint-disable-next-line sonarjs/deprecation
+  // eslint-disable-next-line sonarjs/deprecation, @typescript-eslint/no-deprecated
   printWindow.document.write(html)
   printWindow.document.close()
 

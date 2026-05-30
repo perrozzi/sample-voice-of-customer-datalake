@@ -3,9 +3,8 @@ Additional coverage tests for document_generator/handler.py.
 Covers: feedback gathering with filtering, personas gathering with selection,
 documents/research gathering, and no-context fallback.
 """
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
-
-import pytest
 
 
 class TestDocumentGeneratorFeedbackGathering:
@@ -48,7 +47,6 @@ class TestDocumentGeneratorFeedbackGathering:
         call_kwargs = mock_prompt_steps['prd'].call_args.kwargs
         assert 'App review' in call_kwargs['feedback_context']
 
-    @pytest.mark.skip(reason="Source-branch test fixture uses hardcoded date '2026-04-01' which has aged out of the 30-day query window. Pre-existing on feature/chrome-extension-rebase. PR 6 cleanup item.")
     def test_filters_feedback_by_category(
         self, mock_dynamodb, mock_jobs_table, mock_converse_chain, mock_prompt_steps,
         prd_generation_event, lambda_context
@@ -61,9 +59,11 @@ class TestDocumentGeneratorFeedbackGathering:
         mock_projects_table.put_item.return_value = {}
         mock_projects_table.update_item.return_value = {}
 
+        # Use a recent date so it falls within the handler's default 30-day lookback window
+        recent_date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y-%m-%d')
         mock_feedback_table.query.return_value = {
             'Items': [
-                {'original_text': 'Billing issue', 'source_platform': 'ws', 'sentiment_label': 'negative', 'date': '2026-04-01'},
+                {'original_text': 'Billing issue', 'source_platform': 'ws', 'sentiment_label': 'negative', 'date': recent_date},
             ]
         }
 

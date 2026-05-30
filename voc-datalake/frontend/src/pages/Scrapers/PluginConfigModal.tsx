@@ -106,6 +106,7 @@ function AppEditorForm({
   readonly isPending: boolean
 }) {
   const [values, setValues] = useState<AppConfig>(initialValues)
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- id may be undefined at runtime despite Record<string,string> type
   const isEditing = initialValues.id != null && initialValues.id !== ''
   const hasRequired = plugin.config.filter((f) => f.required === true).every((f) => (values[f.key] ?? '').trim() !== '')
 
@@ -195,6 +196,7 @@ export default function PluginConfigModal({
       try {
         const response = await api.getSourcesStatus([plugin.id])
         const status = response.sources[plugin.id]
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- key may be missing at runtime
         if (status != null) setScheduleEnabled(status.enabled)
       } catch {
         // ignored — schedule status is non-critical

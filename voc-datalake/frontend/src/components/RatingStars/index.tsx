@@ -11,6 +11,7 @@ export default function RatingStars({
   rating, max = 5, showLabel, fallback = null,
 }: RatingStarsProps) {
   if (rating === null) {
+    // eslint-disable-next-line react/jsx-no-useless-fragment -- consistent return type
     return <>{fallback}</>
   }
 

@@ -8,9 +8,8 @@ import { cleanup } from '@testing-library/react'
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 
-// Initialize i18next for tests with inline English translations.
-// Avoids the HTTP backend so tests don't make network calls and so component
-// assertions can match real translated strings instead of raw i18n keys.
+// Initialize i18next for tests with inline English translations
+// This avoids HTTP backend and provides real translated strings in tests.
 import commonEn from '../../public/locales/en/common.json'
 import dashboardEn from '../../public/locales/en/dashboard.json'
 import feedbackEn from '../../public/locales/en/feedback.json'
@@ -28,43 +27,38 @@ import problemAnalysisEn from '../../public/locales/en/problemAnalysis.json'
 import scrapersEn from '../../public/locales/en/scrapers.json'
 import projectDetailEn from '../../public/locales/en/projectDetail.json'
 
-// Single source of truth for namespaces and their resources.
-// Adding a new locale namespace only requires one entry here.
-const namespaceResources = {
-  common: commonEn,
-  dashboard: dashboardEn,
-  feedback: feedbackEn,
-  feedbackDetail: feedbackDetailEn,
-  chat: chatEn,
-  login: loginEn,
-  settings: settingsEn,
-  projects: projectsEn,
-  categories: categoriesEn,
-  components: componentsEn,
-  dataExplorer: dataExplorerEn,
-  feedbackForms: feedbackFormsEn,
-  prioritization: prioritizationEn,
-  problemAnalysis: problemAnalysisEn,
-  scrapers: scrapersEn,
-  projectDetail: projectDetailEn,
-} as const
-
-void i18n.use(initReactI18next).init({
+i18n.use(initReactI18next).init({
   lng: 'en',
   fallbackLng: 'en',
   defaultNS: 'common',
-  ns: Object.keys(namespaceResources),
-  resources: { en: namespaceResources },
+  ns: ['common', 'dashboard', 'feedback', 'feedbackDetail', 'chat', 'login', 'settings', 'projects', 'categories', 'components', 'dataExplorer', 'feedbackForms', 'prioritization', 'problemAnalysis', 'scrapers', 'projectDetail'],
+  resources: {
+    en: {
+      common: commonEn,
+      dashboard: dashboardEn,
+      feedback: feedbackEn,
+      feedbackDetail: feedbackDetailEn,
+      chat: chatEn,
+      login: loginEn,
+      settings: settingsEn,
+      projects: projectsEn,
+      categories: categoriesEn,
+      components: componentsEn,
+      dataExplorer: dataExplorerEn,
+      feedbackForms: feedbackFormsEn,
+      prioritization: prioritizationEn,
+      problemAnalysis: problemAnalysisEn,
+      scrapers: scrapersEn,
+      projectDetail: projectDetailEn,
+    },
+  },
   interpolation: { escapeValue: false },
   react: { useSuspense: false },
 })
 
-// Cleanup DOM and reset mock call history after each test.
-// Clearing mocks prevents test order dependencies where assertions on
-// call counts pick up calls made by previous tests.
+// Cleanup DOM after each test (critical for single jsdom)
 afterEach(() => {
   cleanup()
-  vi.clearAllMocks()
 })
 
 // Mock window.matchMedia for responsive components
@@ -83,41 +77,45 @@ Object.defineProperty(window, 'matchMedia', {
 })
 
 // Mock ResizeObserver for chart components
+// eslint-disable-next-line vitest/prefer-spy-on -- ResizeObserver doesn't exist in test env
 global.ResizeObserver = vi.fn().mockImplementation(() => ({
   observe: vi.fn(),
   unobserve: vi.fn(),
   disconnect: vi.fn(),
-})) as unknown as typeof ResizeObserver
+}))
 
 // Mock IntersectionObserver for lazy loading
+// eslint-disable-next-line vitest/prefer-spy-on -- IntersectionObserver doesn't exist in test env
 global.IntersectionObserver = vi.fn().mockImplementation(() => ({
   observe: vi.fn(),
   unobserve: vi.fn(),
   disconnect: vi.fn(),
+  takeRecords: vi.fn(),
   root: null,
   rootMargin: '',
   thresholds: [],
-})) as unknown as typeof IntersectionObserver
+}))
 
 // Mock scrollTo for navigation tests
-window.scrollTo = vi.fn()
+ 
+window.scrollTo = vi.fn() as unknown as typeof window.scrollTo
 
-// Mock URL.createObjectURL/revokeObjectURL for blob handling (not implemented in jsdom)
+// Mock URL.createObjectURL/revokeObjectURL for blob handling
+// eslint-disable-next-line vitest/prefer-spy-on -- doesn't exist in node env
 URL.createObjectURL = vi.fn().mockReturnValue('blob:mock-url')
+// eslint-disable-next-line vitest/prefer-spy-on -- doesn't exist in node env
 URL.revokeObjectURL = vi.fn()
 
-// Mock localStorage. getItem returns null for missing keys to match the
-// real localStorage contract — important for libraries like Zustand's
-// persist middleware which distinguishes null (no value) from undefined.
+// Mock localStorage
 const localStorageMock = {
-  getItem: vi.fn().mockReturnValue(null),
+  getItem: vi.fn(),
   setItem: vi.fn(),
   removeItem: vi.fn(),
   clear: vi.fn(),
 }
 Object.defineProperty(window, 'localStorage', { value: localStorageMock })
 
-// Mock clipboard API. Tests can assert calls via navigator.clipboard.writeText.
+// Mock clipboard API
 Object.defineProperty(navigator, 'clipboard', {
   value: {
     writeText: vi.fn().mockResolvedValue(undefined),

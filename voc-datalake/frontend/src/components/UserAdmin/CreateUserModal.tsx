@@ -78,6 +78,7 @@ export default function CreateUserModal({
               onChange={(e) => setEmail(e.target.value)}
               placeholder="user@example.com"
               className="input"
+              // eslint-disable-next-line jsx-a11y/no-autofocus
               autoFocus
             />
             <p className="text-xs text-gray-500 mt-1">

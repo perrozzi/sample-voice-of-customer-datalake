@@ -2,9 +2,8 @@
 Additional coverage tests for document_merger/handler.py.
 Covers: use_feedback=True path (lines 80-107), feedback filtering (line 115).
 """
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
-
-import pytest
 
 
 class TestDocumentMergerFeedbackPath:
@@ -54,7 +53,6 @@ class TestDocumentMergerFeedbackPath:
         prompt = call_kwargs.get('prompt', '')
         assert 'Great app!' in prompt
 
-    @pytest.mark.skip(reason="Source-branch test fixture uses hardcoded date '2026-04-01' which has aged out of the 30-day query window. Pre-existing on feature/chrome-extension-rebase. PR 6 cleanup item.")
     def test_filters_feedback_by_category(
         self, mock_dynamodb, mock_jobs_table, mock_converse, merge_documents_event, lambda_context
     ):
@@ -70,10 +68,12 @@ class TestDocumentMergerFeedbackPath:
         mock_projects_table.put_item.return_value = {}
         mock_projects_table.update_item.return_value = {}
 
+        # Use a recent date so feedback falls within the test's 7-day lookback window
+        recent_date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y-%m-%d')
         mock_feedback_table.query.return_value = {
             'Items': [
-                {'original_text': 'Billing issue', 'source_platform': 'ws', 'sentiment_label': 'negative', 'category': 'billing', 'date': '2026-03-28'},
-                {'original_text': 'Good delivery', 'source_platform': 'ws', 'sentiment_label': 'positive', 'category': 'delivery', 'date': '2026-03-28'},
+                {'original_text': 'Billing issue', 'source_platform': 'ws', 'sentiment_label': 'negative', 'category': 'billing', 'date': recent_date},
+                {'original_text': 'Good delivery', 'source_platform': 'ws', 'sentiment_label': 'positive', 'category': 'delivery', 'date': recent_date},
             ]
         }
 

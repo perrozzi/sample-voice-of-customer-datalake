@@ -4,44 +4,21 @@ Handles read-only queries: /feedback/*, /metrics/*
 Split from main handler to reduce Lambda resource policy size.
 """
 
-import os
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-from aws_lambda_powertools.event_handler.exceptions import NotFoundError
-from boto3.dynamodb.conditions import Key
-
 from shared.logging import logger, tracer
-from shared.aws import get_dynamodb_resource
 from shared.api import (
     create_api_resolver, validate_days, validate_limit, validate_int,
     get_configured_categories, api_handler, DEFAULT_CATEGORIES
 )
+from shared.exceptions import NotFoundError
+from shared.feedback import query_feedback_by_date, query_feedback_page
+from shared.tables import get_feedback_table, get_aggregates_table
+from boto3.dynamodb.conditions import Key
 
-# Pagination bounds for /feedback. The candidate window is a function of
-# offset+limit, capped to prevent unbounded DynamoDB scans. The cap also defines
-# the maximum paginable depth.
-MAX_FEEDBACK_OFFSET = 5000
-MIN_CANDIDATE_CAP = 100
-
-# Per-day GSI query page size for date-windowed scans. Used by /feedback,
-# /feedback/entities, /feedback/search, and the source-filtered branches of
-# /metrics/sentiment and /metrics/categories.
-DATE_QUERY_LIMIT = 500
-
-# Soft cap on accumulated candidates when iterating across days for endpoints
-# that aggregate or sample feedback (entities, search, source-filtered metrics).
-CANDIDATES_SOFT_CAP = 1000
-
-# AWS Clients
-dynamodb = get_dynamodb_resource()
-
-# Configuration
-FEEDBACK_TABLE = os.environ.get("FEEDBACK_TABLE", "")
-AGGREGATES_TABLE = os.environ.get("AGGREGATES_TABLE", "")
-
-feedback_table = dynamodb.Table(FEEDBACK_TABLE) if FEEDBACK_TABLE else None
-aggregates_table = dynamodb.Table(AGGREGATES_TABLE) if AGGREGATES_TABLE else None
+feedback_table = get_feedback_table()
+aggregates_table = get_aggregates_table()
 
 # API resolver with standard CORS
 app = create_api_resolver()
@@ -54,83 +31,30 @@ app = create_api_resolver()
 @app.get("/feedback")
 @tracer.capture_method
 def list_feedback():
-    """
-    List feedback with optional filters and offset/limit pagination.
-
-    Pagination semantics: results are paginated within a date-window candidate
-    set (or category-window when only ``category`` is supplied). The returned
-    ``total`` reflects the size of the filtered candidate window, not the full
-    dataset, and the candidate window is bounded by ``MAX_FEEDBACK_OFFSET``.
-
-    The ``is_partial_window`` flag is true when the candidate window was
-    truncated by the cap; in that case more matching records may exist beyond
-    the window and ``total`` is a lower bound on the true count.
-    """
+    """List feedback with optional filters and pagination."""
     params = app.current_event.query_string_parameters or {}
-
+    
     days = validate_days(params.get('days'), default=7)
     source = params.get('source')
-    category = params.get('category')
+    category_param = params.get('category')
     sentiment = params.get('sentiment')
-    limit = validate_limit(params.get('limit'), default=50, max_val=100)
-    offset = validate_int(
-        params.get('offset'),
-        default=0,
-        min_val=0,
-        max_val=MAX_FEEDBACK_OFFSET,
+    limit = validate_limit(params.get('limit'), default=50, max_val=500)
+    offset = validate_int(params.get('offset'), default=0, min_val=0, max_val=10000)
+    
+    # Support comma-separated categories (e.g. "ease_of_use,delivery")
+    categories = [c.strip() for c in category_param.split(',') if c.strip()] if category_param else []
+    
+    page, total = query_feedback_page(
+        feedback_table,
+        days=days,
+        sources=[source] if source else None,
+        categories=categories or None,
+        sentiments=[sentiment] if sentiment else None,
+        limit=limit,
+        offset=offset,
     )
-
-    # Fetch enough candidates to satisfy offset+limit pagination, with a
-    # generous overshoot to absorb post-query filtering by source/sentiment.
-    candidate_cap = max((offset + limit) * 2, MIN_CANDIDATE_CAP)
-
-    candidates: list[dict[str, Any]] = []
-    current_date = datetime.now(timezone.utc)
-    window_truncated = False
-
-    if category and not source:
-        response = feedback_table.query(
-            IndexName='gsi2-by-category',
-            KeyConditionExpression=Key('gsi2pk').eq(f'CATEGORY#{category}'),
-            Limit=candidate_cap,
-            ScanIndexForward=False
-        )
-        candidates = response.get('Items', [])
-        # The category GSI returned a full page at the cap — there may be more.
-        window_truncated = len(candidates) >= candidate_cap and 'LastEvaluatedKey' in response
-    else:
-        for i in range(days):
-            date = (current_date - timedelta(days=i)).strftime('%Y-%m-%d')
-            response = feedback_table.query(
-                IndexName='gsi1-by-date',
-                KeyConditionExpression=Key('gsi1pk').eq(f'DATE#{date}'),
-                Limit=DATE_QUERY_LIMIT,
-                ScanIndexForward=False
-            )
-            candidates.extend(response.get('Items', []))
-            if len(candidates) >= candidate_cap:
-                # We hit the cap before exhausting the date range.
-                window_truncated = i < days - 1
-                break
-
-    if source:
-        candidates = [i for i in candidates if i.get('source_platform') == source]
-    if category and source:
-        candidates = [i for i in candidates if i.get('category') == category]
-    if sentiment:
-        candidates = [i for i in candidates if i.get('sentiment_label') == sentiment]
-
-    total = len(candidates)
-    page = candidates[offset:offset + limit]
-
-    return {
-        'count': len(page),
-        'total': total,
-        'offset': offset,
-        'limit': limit,
-        'is_partial_window': window_truncated,
-        'items': page,
-    }
+    
+    return {'count': len(page), 'total': total, 'offset': offset, 'limit': limit, 'items': page}
 
 
 @app.get("/feedback/urgent")
@@ -195,20 +119,9 @@ def get_entities():
     current_date = datetime.now(timezone.utc)
     
     if source:
-        items = []
-        for i in range(days):
-            date = (current_date - timedelta(days=i)).strftime('%Y-%m-%d')
-            response = feedback_table.query(
-                IndexName='gsi1-by-date',
-                KeyConditionExpression=Key('gsi1pk').eq(f'DATE#{date}'),
-                Limit=DATE_QUERY_LIMIT,
-                ScanIndexForward=False
-            )
-            items.extend(response.get('Items', []))
-            if len(items) >= CANDIDATES_SOFT_CAP:
-                break
-        
-        items = [i for i in items if i.get('source_platform') == source]
+        items = query_feedback_by_date(
+            feedback_table, days=days, sources=[source], limit=5000,
+        )
         
         category_counts = {}
         issues = {}
@@ -331,28 +244,19 @@ def search_feedback():
     current_date = datetime.now(timezone.utc)
     cutoff_date = (current_date - timedelta(days=days)).strftime('%Y-%m-%d')
     
-    candidates = []
-    for i in range(min(days, 30)):
-        date = (current_date - timedelta(days=i)).strftime('%Y-%m-%d')
-        response = feedback_table.query(
-            IndexName='gsi1-by-date',
-            KeyConditionExpression=Key('gsi1pk').eq(f'DATE#{date}'),
-            Limit=300,
-            ScanIndexForward=False
-        )
-        candidates.extend(response.get('Items', []))
-        if len(candidates) >= CANDIDATES_SOFT_CAP:
-            break
+    candidates = query_feedback_by_date(
+        feedback_table,
+        days=days,
+        sources=[source_filter] if source_filter else None,
+        categories=[category_filter] if category_filter else None,
+        sentiments=[sentiment_filter] if sentiment_filter else None,
+        limit=1000,
+        per_day_limit=300,
+    )
     
     items = []
     for item in candidates:
         if item.get('date', '') < cutoff_date:
-            continue
-        if source_filter and item.get('source_platform') != source_filter:
-            continue
-        if sentiment_filter and item.get('sentiment_label') != sentiment_filter:
-            continue
-        if category_filter and item.get('category') != category_filter:
             continue
         
         original_text = (item.get('original_text') or '').lower()
@@ -500,24 +404,14 @@ def get_sentiment_metrics():
     current_date = datetime.now(timezone.utc)
     
     if source:
-        items = []
-        for i in range(days):
-            date = (current_date - timedelta(days=i)).strftime('%Y-%m-%d')
-            response = feedback_table.query(
-                IndexName='gsi1-by-date',
-                KeyConditionExpression=Key('gsi1pk').eq(f'DATE#{date}'),
-                Limit=DATE_QUERY_LIMIT,
-                ScanIndexForward=False
-            )
-            items.extend(response.get('Items', []))
-            if len(items) >= CANDIDATES_SOFT_CAP:
-                break
+        items = query_feedback_by_date(
+            feedback_table, days=days, sources=[source], limit=5000,
+        )
         
         for item in items:
-            if item.get('source_platform') == source:
-                sentiment = item.get('sentiment_label', 'neutral')
-                if sentiment in result:
-                    result[sentiment] += 1
+            sentiment = item.get('sentiment_label', 'neutral')
+            if sentiment in result:
+                result[sentiment] += 1
     else:
         for sentiment in sentiments:
             total = 0
@@ -554,23 +448,13 @@ def get_category_metrics():
     current_date = datetime.now(timezone.utc)
     
     if source:
-        items = []
-        for i in range(days):
-            date = (current_date - timedelta(days=i)).strftime('%Y-%m-%d')
-            response = feedback_table.query(
-                IndexName='gsi1-by-date',
-                KeyConditionExpression=Key('gsi1pk').eq(f'DATE#{date}'),
-                Limit=DATE_QUERY_LIMIT,
-                ScanIndexForward=False
-            )
-            items.extend(response.get('Items', []))
-            if len(items) >= CANDIDATES_SOFT_CAP:
-                break
+        items = query_feedback_by_date(
+            feedback_table, days=days, sources=[source], limit=5000,
+        )
         
         for item in items:
-            if item.get('source_platform') == source:
-                category = item.get('category', 'other')
-                result[category] = result.get(category, 0) + 1
+            category = item.get('category', 'other')
+            result[category] = result.get(category, 0) + 1
     else:
         for category in categories:
             total = 0
@@ -641,6 +525,90 @@ def get_persona_metrics():
         'period_days': days,
         'personas': dict(sorted(personas.items(), key=lambda x: x[1], reverse=True))
     }
+
+
+# ============================================
+# Problem Resolution Endpoints
+# ============================================
+
+@app.get("/feedback/problems/resolved")
+@tracer.capture_method
+def list_resolved_problems():
+    """List all resolved problem IDs."""
+    if not aggregates_table:
+        return {'resolved': []}
+
+    response = aggregates_table.query(
+        KeyConditionExpression=Key('pk').eq('RESOLVED_PROBLEMS') & Key('sk').begins_with('PROBLEM#')
+    )
+
+    resolved = []
+    for item in response.get('Items', []):
+        resolved.append({
+            'problem_id': item['sk'].replace('PROBLEM#', ''),
+            'category': item.get('category', ''),
+            'subcategory': item.get('subcategory', ''),
+            'problem_text': item.get('problem_text', ''),
+            'resolved_at': item.get('resolved_at', ''),
+            'resolved_by': item.get('resolved_by', ''),
+        })
+
+    return {'resolved': resolved}
+
+
+@app.put("/feedback/problems/<problem_id>/resolve")
+@tracer.capture_method
+def resolve_problem(problem_id: str):
+    """Mark a problem group as resolved."""
+    if not aggregates_table:
+        return {'success': False, 'error': 'Aggregates table not configured'}
+
+    body = app.current_event.json_body or {}
+    category = body.get('category', '')
+    subcategory = body.get('subcategory', '')
+    problem_text = body.get('problem_text', '')
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Extract user from Cognito claims if available
+    resolved_by = ''
+    try:
+        request_context = app.current_event.request_context
+        claims = request_context.authorizer.get('claims', {}) if request_context.authorizer else {}
+        resolved_by = claims.get('email', claims.get('cognito:username', ''))
+    except Exception:
+        pass
+
+    aggregates_table.put_item(Item={
+        'pk': 'RESOLVED_PROBLEMS',
+        'sk': f'PROBLEM#{problem_id}',
+        'category': category,
+        'subcategory': subcategory,
+        'problem_text': problem_text,
+        'resolved_at': now,
+        'resolved_by': resolved_by,
+    })
+
+    logger.info(f"Problem {problem_id} marked as resolved by {resolved_by}")
+
+    return {'success': True, 'problem_id': problem_id, 'resolved_at': now}
+
+
+@app.delete("/feedback/problems/<problem_id>/resolve")
+@tracer.capture_method
+def unresolve_problem(problem_id: str):
+    """Unresolve a previously resolved problem group."""
+    if not aggregates_table:
+        return {'success': False, 'error': 'Aggregates table not configured'}
+
+    aggregates_table.delete_item(Key={
+        'pk': 'RESOLVED_PROBLEMS',
+        'sk': f'PROBLEM#{problem_id}',
+    })
+
+    logger.info(f"Problem {problem_id} marked as unresolved")
+
+    return {'success': True, 'problem_id': problem_id}
 
 
 # ============================================
