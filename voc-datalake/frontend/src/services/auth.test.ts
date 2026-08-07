@@ -10,22 +10,26 @@ const mockCompleteNewPasswordChallenge = vi.fn()
 const mockSignOut = vi.fn()
 
 vi.mock('amazon-cognito-identity-js', () => ({
-  CognitoUserPool: vi.fn().mockImplementation(() => ({
-    getCurrentUser: vi.fn().mockReturnValue({
+  CognitoUserPool: vi.fn().mockImplementation(function () {
+    return {
+      getCurrentUser: vi.fn().mockReturnValue({
+        getSession: mockGetSession,
+        refreshSession: mockRefreshSession,
+        signOut: mockSignOut,
+      }),
+    }
+  }),
+  CognitoUser: vi.fn().mockImplementation(function () {
+    return {
+      authenticateUser: mockAuthenticateUser,
+      forgotPassword: mockForgotPassword,
+      confirmPassword: mockConfirmPassword,
+      completeNewPasswordChallenge: mockCompleteNewPasswordChallenge,
       getSession: mockGetSession,
       refreshSession: mockRefreshSession,
       signOut: mockSignOut,
-    }),
-  })),
-  CognitoUser: vi.fn().mockImplementation(() => ({
-    authenticateUser: mockAuthenticateUser,
-    forgotPassword: mockForgotPassword,
-    confirmPassword: mockConfirmPassword,
-    completeNewPasswordChallenge: mockCompleteNewPasswordChallenge,
-    getSession: mockGetSession,
-    refreshSession: mockRefreshSession,
-    signOut: mockSignOut,
-  })),
+    }
+  }),
   AuthenticationDetails: vi.fn(),
   CognitoRefreshToken: vi.fn(),
 }))
