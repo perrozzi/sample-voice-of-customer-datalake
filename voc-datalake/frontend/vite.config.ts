@@ -10,12 +10,22 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-recharts': ['recharts'],
-          'vendor-icons': ['lucide-react'],
-          'vendor-query': ['@tanstack/react-query'],
-          'vendor-markdown': ['react-markdown', 'remark-gfm'],
+        manualChunks: (id) => {
+          if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
+            return 'vendor-react'
+          }
+          if (id.includes('recharts')) {
+            return 'vendor-recharts'
+          }
+          if (id.includes('lucide-react')) {
+            return 'vendor-icons'
+          }
+          if (id.includes('@tanstack/react-query')) {
+            return 'vendor-query'
+          }
+          if (id.includes('react-markdown') || id.includes('remark-gfm')) {
+            return 'vendor-markdown'
+          }
         },
       },
     },
