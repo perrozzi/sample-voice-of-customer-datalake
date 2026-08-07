@@ -48,7 +48,7 @@ export const useChatStore = create<ChatStore>()(
       activeConversationId: null,
 
       createConversation: () => {
-        const id = `conv_${Date.now()}`
+        const id = `conv_${crypto.randomUUID()}`
         const newConversation: Conversation = {
           id,
           title: 'New Conversation',
