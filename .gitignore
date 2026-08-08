@@ -79,3 +79,6 @@ voc-datalake/Workshop/*
 .kiro/memory/
 .kiro/sessions/
 .kiro/NEW_SESSION_PROMPT.md
+
+# Local scratch
+.scratch/
