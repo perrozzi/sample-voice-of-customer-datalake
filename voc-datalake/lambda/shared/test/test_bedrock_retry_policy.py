@@ -243,10 +243,23 @@ class TestThePolicyCostsTheApiHandlersNothingAtColdStart:
     lambda/conftest.py, and for the same reason: half this suite has already
     imported these modules, so an in-process check on `sys.modules` would pass
     regardless of the import graph.
+
+    What it does NOT see, so it is not read as stronger than it is: names are
+    collapsed to their top-level package, so the guard catches a new third-party
+    DEPENDENCY, not a new submodule of one already present — a fresh
+    `boto3.dynamodb.transform`-shaped import inside `converse`, or inside a
+    `shared.*` module it newly pulls in, costs cold-start time invisibly here.
+    Collapsing is deliberate: the comparison is about what has to be installed and
+    loaded at all, and first-party `shared.*` names would otherwise dominate the
+    diff with modules that are in both bundles by construction.
+
+    Requires Python 3.10+ in the subprocess for `sys.stdlib_module_names`. The
+    runtime is 3.14 and the venv 3.13; on anything older the assertion below
+    reports the subprocess's own stderr rather than a wrong answer.
     """
 
     @staticmethod
-    def _third_party_imports(module_name: str) -> set:
+    def _third_party_imports(module_name: str) -> set[str]:
         import json
         import subprocess
         import sys
