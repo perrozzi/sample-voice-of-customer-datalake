@@ -223,3 +223,57 @@ class TestTheRetryPolicy:
             bedrock_call_with_retry(call, step_name='t')
 
         assert call.call_count == 1
+
+
+class TestThePolicyCostsTheApiHandlersNothingAtColdStart:
+    """Routing the raw callers through this policy must not widen their bundles.
+
+    `api/product_context.py` and `api/manual_import_processor.py` now import
+    `shared.converse` at module scope, which puts it on the cold-start path of API
+    handlers that previously reached Bedrock through `shared.aws` alone. Those
+    handlers answer browser requests, so a heavyweight import hoisted into
+    `converse` later would be paid on every cold start of theirs.
+
+    Stated as a RELATIVE property rather than against an allowlist: every module
+    that reaches Bedrock already imports `shared.aws` (that is where the client
+    comes from), so "adds nothing `shared.aws` did not already add" is exactly the
+    question — and unlike a curated list it cannot go stale.
+
+    Same subprocess technique as the `imports_cryptography` fixture in
+    lambda/conftest.py, and for the same reason: half this suite has already
+    imported these modules, so an in-process check on `sys.modules` would pass
+    regardless of the import graph.
+    """
+
+    @staticmethod
+    def _third_party_imports(module_name: str) -> set:
+        import json
+        import subprocess
+        import sys
+
+        code = (
+            'import sys, json; before = set(sys.modules);'
+            f' import {module_name};'
+            " added = {m.split('.')[0] for m in set(sys.modules) - before};"
+            ' print(json.dumps(sorted('
+            '     a for a in added'
+            "     if a not in sys.stdlib_module_names and not a.startswith('_')"
+            ' )))'
+        )
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True, text=True, cwd=str(LAMBDA_ROOT), check=False,
+        )
+        assert result.returncode == 0, f'importing {module_name} failed: {result.stderr}'
+        return set(json.loads(result.stdout.strip().splitlines()[-1]))
+
+    def test_converse_pulls_in_nothing_that_the_client_module_does_not(self):
+        from_aws = self._third_party_imports('shared.aws')
+        from_converse = self._third_party_imports('shared.converse')
+
+        assert from_converse <= from_aws, (
+            f'importing shared.converse pulls in {sorted(from_converse - from_aws)}, '
+            f'which shared.aws does not. Two API handlers now import it at module '
+            f'scope, so anything added here is paid on their cold starts — keep the '
+            f'new import inside the function that needs it.'
+        )

@@ -431,7 +431,11 @@ def bedrock_call_with_retry(
     Args:
         call: Zero-argument callable performing ONE Bedrock request. Called again
             per retry, so it must be safe to re-run (build the request outside).
-        max_retries: Maximum attempts, including the first.
+        max_retries: Maximum attempts, including the first. Every caller passes a
+            literal or takes the default — nothing derives it from configuration or
+            the environment (the research prompt templates carry `max_tokens`, not
+            this), so the 0 case below is a programming error rather than something
+            a settings row can produce.
         raise_on_throttle: If True, raise BedrockThrottlingError once throttling
             has exhausted the attempts. If False, return None instead.
         step_name: Name of the current step, for logging.
