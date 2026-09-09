@@ -6,6 +6,7 @@ Provides pre-configured clients with connection reuse.
 import json
 import boto3
 from functools import lru_cache
+from typing import Final
 from shared.exceptions import ValidationError
 from shared.logging import logger
 
@@ -81,19 +82,67 @@ def get_secrets_client():
     return _secrets_client
 
 
+# ── Bedrock generation budget ────────────────────────────────────────────────
+# These two numbers MULTIPLY, and their product used to be the whole bug: at
+# read_timeout=300 with max_attempts=3 the budget was 900 s, which is EXACTLY the
+# 15-minute ceiling of the job Lambdas that generate documents, prototypes,
+# personas and research. A generation needing more than five minutes therefore had
+# no path to success — measured live on a prototype build: attempt 1 read-timed
+# out at 300 s, botocore retried twice more on its own, and Lambda killed the
+# function at 900 s with nothing returned and the job row still `running`.
+#
+# Two properties of that failure are worth keeping in view, because both argue for
+# ONE attempt rather than for a longer timeout alone:
+#
+#   * The retries were INVISIBLE. They happen inside botocore, below
+#     shared/converse.py's own retry loop, so the application log read
+#     "Attempt 1/5" for the entire 900 s. Anyone reading it concludes "one slow
+#     call"; the truth was three abandoned generations, each re-submitting the
+#     prompt and re-paying for a full generation.
+#   * `converse` is NON-STREAMING, so the socket is legitimately idle until the
+#     whole generation is done. A read timeout here measures "big", not "broken" —
+#     and the larger the requested output, the more certain it fires. Retrying a
+#     request that just consumed the entire read timeout cannot succeed with less
+#     time remaining, so botocore's retries could only ever burn budget.
+#
+# shared/converse.py still retries what genuinely IS transient (throttling,
+# ServiceUnavailable) with backoff, and it logs every attempt — so one attempt
+# here removes a duplicate layer rather than removing retry. `mode: 'standard'`
+# is explicit because in that mode max_attempts counts TOTAL attempts (legacy
+# mode's reading of the same key is ambiguous); same shape as the delegation
+# client in shared/mcp_delegate.py.
+#
+# ONE attempt is also what keeps this safe for the short-timeout callers of this
+# same cached client: the budget equals the read timeout for everyone, so no
+# caller is ever handed a multiple of it. The 30 s API handlers hit their own
+# ceiling long before this timeout binds, which is unchanged from before and
+# wastes nothing now that no retry follows.
+#
+# The value sits below the longest Bedrock Lambda timeout (900 s) with room left
+# for the handler to record the failure it hit, so a too-long generation ends as
+# a `failed` job with a diagnosis instead of a silent kill. That relationship is
+# pinned in lib/stacks/api-stack.test.ts — it spans a Python constant and a CDK
+# timeout, which is exactly the pair no single file can keep honest.
+BEDROCK_READ_TIMEOUT_SECONDS: Final = 840
+BEDROCK_MAX_ATTEMPTS: Final = 1
+BEDROCK_CONNECT_TIMEOUT_SECONDS: Final = 10
+
+
 def get_bedrock_client():
     """Get shared Bedrock Runtime client with connection reuse.
-    
-    Uses extended read timeout (5 minutes) to handle long LLM responses
-    that can take 2-3 minutes for complex persona generation tasks.
+
+    ONE cached client serves every Bedrock surface — documents, prototypes,
+    personas, research, chat, category generation, scrapers — so its read/retry
+    budget is sized for the longest-running of them. See
+    BEDROCK_READ_TIMEOUT_SECONDS above for why the retry budget is 1.
     """
     global _bedrock_client
     if _bedrock_client is None:
         from botocore.config import Config
         config = Config(
-            read_timeout=300,  # 5 minutes for long LLM responses
-            connect_timeout=10,
-            retries={'max_attempts': 3}
+            read_timeout=BEDROCK_READ_TIMEOUT_SECONDS,
+            connect_timeout=BEDROCK_CONNECT_TIMEOUT_SECONDS,
+            retries={'max_attempts': BEDROCK_MAX_ATTEMPTS, 'mode': 'standard'},
         )
         _bedrock_client = boto3.client("bedrock-runtime", config=config)
     return _bedrock_client

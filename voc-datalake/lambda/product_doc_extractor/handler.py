@@ -282,6 +282,25 @@ JPEG_SCAN_BYTES = 256 * 1024
 
 MAX_DESCRIPTION_TOKENS = 4096
 
+# This Lambda's Bedrock budget. Deliberately NOT imported from shared/aws.py —
+# this handler is stdlib+boto3 only so CoreStack stays container-free (see the
+# module docstring), the same reason _is_conditional_check_failure is duplicated
+# below. The reasoning is one place, there; only the numbers differ, because they
+# are sized against THIS function's 120 s timeout rather than the 15-minute jobs.
+#
+# botocore's DEFAULTS are wrong here in exactly the way the shared client's old
+# ones were: a 60 s read timeout with the default retry budget can outlast this
+# function's own 120 s ceiling, so the final attempt is always killed in flight —
+# a guaranteed-doomed retry instead of a diagnosis. One attempt, and a read
+# timeout that still leaves time to record the failure. 90 s is also a real
+# widening for a slow description: the default gave up at 60 s.
+#
+# Raising these means re-checking the 120 s timeout in core-stack.ts, which is in
+# turn bounded by product_context.py's EXTRACTION_STALL_SECONDS (300).
+BEDROCK_READ_TIMEOUT_SECONDS = 90
+BEDROCK_MAX_ATTEMPTS = 1
+BEDROCK_CONNECT_TIMEOUT_SECONDS = 10
+
 # The prototype generator's neutral default palette is indigo #4F46E5 (see
 # PROTOTYPE_HTML_SYSTEM_PROMPT in lambda/jobs/document_generator/handler.py). A
 # description that comes back with adjectives instead of values leaves the
@@ -354,7 +373,12 @@ def _s3():
 
 def _bedrock():
     if 'bedrock' not in _clients:
-        _clients['bedrock'] = boto3.client('bedrock-runtime')
+        from botocore.config import Config
+        _clients['bedrock'] = boto3.client('bedrock-runtime', config=Config(
+            read_timeout=BEDROCK_READ_TIMEOUT_SECONDS,
+            connect_timeout=BEDROCK_CONNECT_TIMEOUT_SECONDS,
+            retries={'max_attempts': BEDROCK_MAX_ATTEMPTS, 'mode': 'standard'},
+        ))
     return _clients['bedrock']
 
 

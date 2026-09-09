@@ -6,7 +6,7 @@ Provides a unified interface for LLM interactions with optional tool use.
 import random
 import time
 from typing import Callable
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, ReadTimeoutError
 from shared.logging import logger
 from shared.aws import get_bedrock_client
 from shared.model_config import (
@@ -473,6 +473,32 @@ def _converse_with_retry(
                 # Non-retryable error
                 logger.error(f"[BEDROCK] Non-retryable error for step '{step_name}': {error_code} - {error_message}")
                 raise
+
+        except ReadTimeoutError:
+            # NOT retried, deliberately — and this branch is what keeps the
+            # one-attempt budget in shared/aws.py from being undone here.
+            #
+            # `converse` is non-streaming, so a read timeout means the generation
+            # needed longer than the client was willing to wait. The identical
+            # request will not run faster on a second try, and each retry
+            # re-submits the prompt and re-pays for a full abandoned generation
+            # while spending time this invocation no longer has. Retrying would
+            # simply move the old 3 × 300 = 900 collision up one layer and make it
+            # 5 × 840, i.e. the same bug with a bigger multiplier.
+            #
+            # Raised rather than swallowed so the caller's own failure path runs
+            # (shared/jobs.py records the job `failed`), and logged HERE because
+            # the read timeout is the one attempt outcome the application would
+            # otherwise never name — it is not a ClientError and carries no error
+            # code to triage from.
+            attempt_elapsed = time.time() - attempt_start
+            logger.error(
+                f"[BEDROCK] Read timeout for step '{step_name}' after "
+                f"{attempt_elapsed:.2f}s — not retried: a non-streaming generation "
+                f"that exceeded the read budget will exceed it again. Reduce "
+                f"max_tokens for this step or split it."
+            )
+            raise
 
         except Exception as e:
             attempt_elapsed = time.time() - attempt_start

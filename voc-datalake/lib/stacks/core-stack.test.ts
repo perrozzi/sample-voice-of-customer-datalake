@@ -8,6 +8,8 @@
  * Pre-#105 environments deploy with `-c omitUserPoolUsernameConfiguration=true`
  * to keep their pool untouched; greenfield keeps case-insensitive sign-in.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
@@ -1124,6 +1126,33 @@ describe('VocCoreStack product doc extractor', () => {
     // would start marking SUCCESSFUL extractions as failed.
     expect(fn.Timeout).toBe(120);
     expect(fn.MemorySize).toBeGreaterThanOrEqual(512);
+  });
+
+  it('gives its Bedrock client a budget that fits inside that timeout', () => {
+    // This handler builds its OWN Bedrock client — it is stdlib+boto3 only, so it
+    // cannot import shared/aws.py — and botocore's defaults are wrong here in the
+    // same way the shared client's old ones were: a 60 s read timeout with the
+    // default retry budget can outlast this function's 120 s ceiling, so the last
+    // attempt is always killed in flight. That is a guaranteed-doomed retry, not
+    // a diagnosis, and it is exactly the collision that cost 45 minutes on the
+    // prototype path (see lib/stacks/api-stack.test.ts for the job-Lambda half).
+    //
+    // Read from the handler source because the two numbers that collide live in
+    // different languages and different files; nothing else can see both.
+    const source = readFileSync(
+      join(__dirname, '..', '..', 'lambda', 'product_doc_extractor', 'handler.py'),
+      'utf-8',
+    );
+    const readTimeout = source.match(/^BEDROCK_READ_TIMEOUT_SECONDS\s*=\s*(\d+)/m)?.[1];
+    const maxAttempts = source.match(/^BEDROCK_MAX_ATTEMPTS\s*=\s*(\d+)/m)?.[1];
+    expect(readTimeout, 'could not read BEDROCK_READ_TIMEOUT_SECONDS from the handler').toBeDefined();
+    expect(maxAttempts, 'could not read BEDROCK_MAX_ATTEMPTS from the handler').toBeDefined();
+
+    const budget = Number(readTimeout) * Number(maxAttempts);
+    const fn = extractorFunction();
+
+    expect(budget, `the extractor waits up to ${budget}s on Bedrock but runs for ${fn.Timeout}s`)
+      .toBeLessThan(fn.Timeout);
   });
 
   it('ships without a bundled layer, so CoreStack stays container-free', () => {
