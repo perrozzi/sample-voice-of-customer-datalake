@@ -5,7 +5,7 @@ Provides a unified interface for LLM interactions with optional tool use.
 
 import random
 import time
-from typing import Callable
+from typing import Callable, TypeVar
 from botocore.exceptions import ClientError, ReadTimeoutError
 from shared.logging import logger
 from shared.aws import get_bedrock_client
@@ -13,6 +13,12 @@ from shared.model_config import (
     get_active_model_id, omits_temperature, uses_adaptive_thinking, DEFAULT_SURFACE,
 )
 
+
+# Whatever the wrapped Bedrock call returns, so bedrock_call_with_retry does not
+# flatten it to `object`: its callers read the response directly (`.get('output')`,
+# `['body'].read()`) now that none of them guards against None, and a return type
+# that hid the shape would invite those guards straight back.
+_CallResult = TypeVar('_CallResult')
 
 # Retry configuration
 DEFAULT_MAX_RETRIES = 5
@@ -398,12 +404,12 @@ def converse(
 
 
 def bedrock_call_with_retry(
-    call: Callable[[], object],
+    call: Callable[[], _CallResult],
     max_retries: int = DEFAULT_MAX_RETRIES,
     raise_on_throttle: bool = True,
     step_name: str = "unknown",
     call_label: str = "the Bedrock call",
-) -> object | None:
+) -> _CallResult | None:
     """Run *call*, retrying only the failures a second attempt can actually fix.
 
     THE POLICY LIVES HERE because botocore cannot express it: **retry a throttle,
