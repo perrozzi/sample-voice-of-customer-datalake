@@ -138,7 +138,7 @@ def handle_job(ctx: JobContext, project_id: str, job_id: str, import_config: dic
             inferenceConfig={'maxTokens': prompt_config['max_tokens']}
         ),
         step_name='import_persona',
-    ) or {}
+    )
     
     response_text = response.get('output', {}).get('message', {}).get('content', [{}])[0].get('text', '')
     

@@ -498,9 +498,10 @@ def interview_turn(project_id: str, body: dict) -> dict:
             step_name='interview_turn',
         )
     except Exception as e:
+        # Covers sustained throttling too: bedrock_call_with_retry raises rather
+        # than returning None while raise_on_throttle is left at its default, so
+        # there is no empty-result case to check for below.
         logger.exception(f'Interview Bedrock call failed: {e}')
-        raise ServiceError('AI interview unavailable. Please try again.')
-    if not isinstance(resp, dict):  # throttled out with retries disabled
         raise ServiceError('AI interview unavailable. Please try again.')
 
     output_blocks = resp.get('output', {}).get('message', {}).get('content', [])

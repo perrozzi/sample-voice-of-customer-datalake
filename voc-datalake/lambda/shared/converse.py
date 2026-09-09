@@ -403,7 +403,7 @@ def bedrock_call_with_retry(
     raise_on_throttle: bool = True,
     step_name: str = "unknown",
     call_label: str = "the Bedrock call",
-):
+) -> object | None:
     """Run *call*, retrying only the failures a second attempt can actually fix.
 
     THE POLICY LIVES HERE because botocore cannot express it: **retry a throttle,
@@ -432,11 +432,18 @@ def bedrock_call_with_retry(
         call_label: What is being called, for logging.
 
     Returns:
-        Whatever *call* returns, or None when retries are exhausted with
-        raise_on_throttle=False.
+        Whatever *call* returns. **None ONLY when raise_on_throttle=False** — with
+        the default this either returns a result or raises, so callers do not need
+        to guard against None. That is a total contract on purpose: three call
+        sites each inventing their own None check is how one of them ends up
+        without it, and the failure there is a TypeError on the next line instead
+        of a diagnosis.
 
     Raises:
-        BedrockThrottlingError: If throttled after max_retries and raise_on_throttle=True
+        BedrockThrottlingError: If throttling exhausted the attempts and
+            raise_on_throttle=True — including the degenerate max_retries=0, where
+            no attempt was made at all. A caller error must fail loudly rather
+            than return an empty result that reads like a Bedrock answer.
         ReadTimeoutError: Immediately, on the first read timeout, unretried
         ClientError: For non-retryable AWS errors
     """
@@ -527,11 +534,17 @@ def bedrock_call_with_retry(
                 logger.error(f"[BEDROCK] Step '{step_name}' failed after {max_retries} attempts: {e}")
                 raise
 
-    # Reached when throttling exhausted the attempts with raise_on_throttle=False.
+    # Reached when the attempts ran out without a result: throttling with
+    # raise_on_throttle=False, or the degenerate max_retries=0 where the loop never
+    # ran and `last_exception` is therefore None.
     logger.error(f"[BEDROCK] Step '{step_name}' exhausted all retries without success")
-    if raise_on_throttle and last_exception:  # pragma: no cover — defensive guard; retryable errors raise inside the loop
+    if raise_on_throttle:
+        # Not conditional on last_exception: with max_retries=0 there is none, and
+        # returning None there would hand a caller who cannot expect it (see the
+        # contract above) something that reads like an empty Bedrock answer.
+        cause = f': {last_exception}' if last_exception else ' (no attempt was made)'
         raise BedrockThrottlingError(
-            f"Bedrock failed after {max_retries} retries for step '{step_name}': {last_exception}"
+            f"Bedrock failed after {max_retries} retries for step '{step_name}'{cause}"
         )
     return None
 

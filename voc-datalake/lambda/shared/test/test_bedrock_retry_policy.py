@@ -45,7 +45,18 @@ EXEMPT = {
 
 
 def _first_party_modules():
-    """Every non-test .py under lambda/, excluding vendored layer code."""
+    """Every non-test .py under lambda/, excluding vendored layer code.
+
+    Two limits, stated so the guard is not read as more than it is:
+
+    * anything with `/test` in its path is skipped, which would also skip a
+      production module named `testing_*.py`. None exists; if one appears it is
+      unguarded and this line is why.
+    * the caller only feeds modules whose source mentions `get_bedrock_client` or
+      `bedrock-runtime`, so a module handed an already-built client as a PARAMETER
+      escapes the scan. `shared/avatar.py` is the one place that shape exists today
+      and it is exempt on its own merits.
+    """
     for path in sorted(LAMBDA_ROOT.rglob('*.py')):
         rel = path.relative_to(LAMBDA_ROOT).as_posix()
         if rel.startswith(('layers/', 'test')) or '/test' in f'/{rel}':
@@ -167,6 +178,24 @@ class TestTheRetryPolicy:
             bedrock_call_with_retry(call, max_retries=3, step_name='t')
 
         assert call.call_count == 3
+
+    def test_a_zero_attempt_budget_raises_rather_than_returning_nothing(self):
+        """The contract three call sites now rely on: with the default, no None.
+
+        `max_retries=0` is the one way the loop can finish having recorded no
+        exception, and it is a caller mistake. Returning None there would hand a
+        caller that does not check — because the contract says it need not — an
+        empty value that reads exactly like a Bedrock answer, and the failure
+        surfaces as a TypeError one line later rather than as a diagnosis.
+        """
+        from shared.converse import BedrockThrottlingError, bedrock_call_with_retry
+
+        call = MagicMock()
+
+        with pytest.raises(BedrockThrottlingError, match='no attempt was made'):
+            bedrock_call_with_retry(call, max_retries=0, step_name='t')
+
+        call.assert_not_called()
 
     @patch('shared.converse.time.sleep')
     def test_sustained_throttling_returns_none_when_asked_not_to_raise(self, mock_sleep):

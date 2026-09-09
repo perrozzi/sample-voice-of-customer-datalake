@@ -46,7 +46,7 @@ displays: the UI's build identifier is the short git commit SHA, injected at bui
   retrying is the reader's decision.
 - The product-document extractor, which builds its own Bedrock client, had the same collision at a
   smaller scale: it waited sixty seconds for an image description with retries behind it, against a
-  two-minute function, so its final attempt was always cut off. It now waits ninety seconds once,
+  two-minute function, so its final attempt was always cut off. It now waits eighty seconds once,
   which also lets a slow description finish where it previously gave up.
 - A CSV upload no longer overwrites an earlier one whose `id` column covered the same numbers.
   A row's identity was the `id` column value as written, and every CSV upload enters the pipeline
