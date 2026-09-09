@@ -745,6 +745,15 @@ export class VocApiStack extends VocStack {
     // the multiplier. And it does not affect the Step Functions path for PRD/PR-FAQ:
     // an EventInvokeConfig governs async invocations only, so createDocumentStateMachine's
     // own explicit, VISIBLE retries below are untouched.
+    //
+    // Scoped to these four on purpose. The other async targets in this app keep the
+    // AWS default, because for them a re-drive is a benefit rather than a repeated
+    // bill: `voc-manual-import-processor` re-does bounded, content-keyed work that
+    // the processor's idempotency records already de-duplicate, and the scraper and
+    // integration invocations are watermark-driven, so repeating one fetches from
+    // where it left off. What sets these four apart is that ONE invocation is ONE
+    // large generation: a re-drive re-pays for it in full and cannot succeed for a
+    // reason the first attempt failed on.
     const JOB_ASYNC_RETRY_ATTEMPTS = 0;
 
     // Persona Generator Job Lambda

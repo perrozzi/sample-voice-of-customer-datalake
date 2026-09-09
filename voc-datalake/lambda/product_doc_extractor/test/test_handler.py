@@ -17,6 +17,7 @@ passes for the wrong reason:
     build_product_context_block depends on the second one.
 """
 import pytest
+from unittest.mock import patch
 
 from .conftest import (
     DOCUMENTS_DEFAULT_MODEL,
@@ -795,14 +796,7 @@ class TestTheBedrockClientBudget:
 
     @staticmethod
     def _build(extractor, times: int = 1):
-        """Call `_bedrock()` `times` over a patched boto3 and return (clients, mock).
-
-        Imported locally because this module otherwise never patches boto3 — the
-        rest of the suite injects fakes into `_clients` (see conftest), and only
-        the factory itself needs the real thing stubbed.
-        """
-        from unittest.mock import patch
-
+        """Call `_bedrock()` `times` over a patched boto3 and return (clients, mock)."""
         with patch.object(extractor, 'boto3') as mock_boto3:
             clients = [extractor._bedrock() for _ in range(times)]
         return clients, mock_boto3

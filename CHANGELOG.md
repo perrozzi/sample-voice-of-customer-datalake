@@ -34,6 +34,11 @@ displays: the UI's build identifier is the short git commit SHA, injected at bui
   reported and recorded as a failed job rather than retried into the ceiling. Prototype builds are
   where this was measured, because they ask for the largest output, but every Bedrock surface shared
   the same client and the same ceiling.
+  Two of the shorter jobs — merging documents at ten minutes, importing a persona at five — are
+  bounded by their own limit rather than by that fourteen minutes, so a generation longer than their
+  own budget still ends without an explanation attached to it, exactly as it did before. Retrying a
+  throttled request is unaffected everywhere: that is worth a second attempt and is still made, with
+  backoff, by the platform rather than by the AWS client underneath it.
 - A failed prototype build no longer costs up to three quarters of an hour. The job functions are
   invoked asynchronously, where AWS re-runs a failed invocation twice more by default, so one click
   became roughly forty-five minutes of model work — invisible, because each re-run wrote progress to

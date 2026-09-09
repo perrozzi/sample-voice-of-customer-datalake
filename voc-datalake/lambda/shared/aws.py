@@ -83,46 +83,30 @@ def get_secrets_client():
 
 
 # ── Bedrock generation budget ────────────────────────────────────────────────
-# These two numbers MULTIPLY, and their product used to be the whole bug: at
-# read_timeout=300 with max_attempts=3 the budget was 900 s, which is EXACTLY the
-# 15-minute ceiling of the job Lambdas that generate documents, prototypes,
-# personas and research. A generation needing more than five minutes therefore had
-# no path to success — measured live on a prototype build: attempt 1 read-timed
-# out at 300 s, botocore retried twice more on its own, and Lambda killed the
-# function at 900 s with nothing returned and the job row still `running`.
+# THE INVARIANT: these two numbers MULTIPLY, and the product must stay under the
+# timeout of the Lambda making the call. At 300 x 3 it was 900 s — exactly the
+# 15-minute job ceiling — so a generation needing over five minutes had no path to
+# success and paid for three abandoned ones on the way. Pinned across both
+# languages in lib/stacks/api-stack.test.ts and lambda/shared/test/test_aws.py,
+# because no single file can see both halves.
 #
-# Two properties of that failure are worth keeping in view, because both argue for
-# ONE attempt rather than for a longer timeout alone:
+# Why the retry budget is 1, since a longer timeout alone would not do it:
+#   * `converse` is NON-STREAMING, so the socket is idle until the generation
+#     finishes. A read timeout measures "big", not "broken", and retrying a request
+#     that just consumed the whole timeout cannot succeed with less time left.
+#   * botocore retries BELOW shared/converse.py's own loop, so its attempts are
+#     invisible in the application log. `bedrock_call_with_retry` there is the one
+#     policy that can tell a throttle (retry, nearly free) from a read timeout (do
+#     not); botocore's single attempt budget covers both and cannot.
+#   * One attempt keeps ONE cached client safe for callers of every length: the
+#     budget equals the read timeout for everyone, so nobody is handed a multiple
+#     of it. Shorter callers reach their own ceiling first, as they already did.
 #
-#   * The retries were INVISIBLE. They happen inside botocore, below
-#     shared/converse.py's own retry loop, so the application log read
-#     "Attempt 1/5" for the entire 900 s. Anyone reading it concludes "one slow
-#     call"; the truth was three abandoned generations, each re-submitting the
-#     prompt and re-paying for a full generation.
-#   * `converse` is NON-STREAMING, so the socket is legitimately idle until the
-#     whole generation is done. A read timeout here measures "big", not "broken" —
-#     and the larger the requested output, the more certain it fires. Retrying a
-#     request that just consumed the entire read timeout cannot succeed with less
-#     time remaining, so botocore's retries could only ever burn budget.
-#
-# shared/converse.py still retries what genuinely IS transient (throttling,
-# ServiceUnavailable) with backoff, and it logs every attempt — so one attempt
-# here removes a duplicate layer rather than removing retry. `mode: 'standard'`
-# is explicit because in that mode max_attempts counts TOTAL attempts (legacy
-# mode's reading of the same key is ambiguous); same shape as the delegation
-# client in shared/mcp_delegate.py.
-#
-# ONE attempt is also what keeps this safe for the short-timeout callers of this
-# same cached client: the budget equals the read timeout for everyone, so no
-# caller is ever handed a multiple of it. The 30 s API handlers hit their own
-# ceiling long before this timeout binds, which is unchanged from before and
-# wastes nothing now that no retry follows.
-#
-# The value sits below the longest Bedrock Lambda timeout (900 s) with room left
-# for the handler to record the failure it hit, so a too-long generation ends as
-# a `failed` job with a diagnosis instead of a silent kill. That relationship is
-# pinned in lib/stacks/api-stack.test.ts — it spans a Python constant and a CDK
-# timeout, which is exactly the pair no single file can keep honest.
+# `mode: 'standard'` is explicit because there max_attempts counts TOTAL attempts;
+# legacy mode's reading of the same key is ambiguous. Same shape as
+# shared/mcp_delegate.py. The 60 s left under the 900 s ceiling is for the handler
+# to record the failure (shared/jobs.py writing the job `failed`) instead of being
+# killed mid-flight.
 BEDROCK_READ_TIMEOUT_SECONDS: Final = 840
 BEDROCK_MAX_ATTEMPTS: Final = 1
 BEDROCK_CONNECT_TIMEOUT_SECONDS: Final = 10

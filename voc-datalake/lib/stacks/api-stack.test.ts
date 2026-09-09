@@ -36,6 +36,10 @@ import { z } from 'zod';
 
 import { VocApiStack } from './api-stack';
 import { ManifestSchema } from '../plugin-loader';
+import {
+  BEDROCK_FAILURE_RECORDING_RESERVE_SECONDS,
+  pythonIntConstant,
+} from '../test-support/cross-language-invariants';
 
 /** The only routes that may be served without credentials.
  *
@@ -2911,21 +2915,11 @@ describe('the Bedrock generation budget fits the job Lambdas', () => {
   };
 
   /** read_timeout x max_attempts, read from the Python that configures the client. */
-  const bedrockBudgetSeconds = () => {
-    const source = readRepoFile('lambda', 'shared', 'aws.py');
-    const readTimeout = source.match(/^BEDROCK_READ_TIMEOUT_SECONDS:\s*Final\s*=\s*(\d+)/m)?.[1];
-    const maxAttempts = source.match(/^BEDROCK_MAX_ATTEMPTS:\s*Final\s*=\s*(\d+)/m)?.[1];
-    // Aimed at the NAMED constants: a rename or an inlined literal must fail
-    // loudly here rather than quietly stop matching and pass.
-    expect(readTimeout, 'could not read BEDROCK_READ_TIMEOUT_SECONDS from shared/aws.py').toBeDefined();
-    expect(maxAttempts, 'could not read BEDROCK_MAX_ATTEMPTS from shared/aws.py').toBeDefined();
-    return Number(readTimeout) * Number(maxAttempts);
-  };
-
-  // Enough of the invocation to write the job `failed` and unwind, generously.
-  // The point is that the reserve is DELIBERATE rather than whatever rounding
-  // happened to leave behind.
-  const FAILURE_RECORDING_RESERVE_SECONDS = 30;
+  const bedrockMaxAttempts = () =>
+    pythonIntConstant('BEDROCK_MAX_ATTEMPTS', 'lambda', 'shared', 'aws.py');
+  const bedrockBudgetSeconds = () =>
+    pythonIntConstant('BEDROCK_READ_TIMEOUT_SECONDS', 'lambda', 'shared', 'aws.py') *
+    bedrockMaxAttempts();
 
   it('fires before the long-generation jobs are killed, with time to record the failure', () => {
     const budget = bedrockBudgetSeconds();
@@ -2936,28 +2930,53 @@ describe('the Bedrock generation budget fits the job Lambdas', () => {
       // timeout far enough for shared/jobs.py to write the job `failed`, or a slow
       // generation is a silent kill and a job row stuck on `running` forever.
       expect(budget, `${fn.constructId} runs ${fn.timeout}s; the Bedrock read budget is ${budget}s`)
-        .toBeLessThan(fn.timeout - FAILURE_RECORDING_RESERVE_SECONDS);
+        .toBeLessThan(fn.timeout - BEDROCK_FAILURE_RECORDING_RESERVE_SECONDS);
     }
   });
 
-  it('never multiplies inside a caller too short for the read timeout to bind', () => {
-    // Deliberately NOT asserting `budget < timeout` for every Bedrock caller, and
-    // the asymmetry is the point — the same shape the delegation suite above
-    // records. ONE cached client serves the 30 s API handlers, the 5-10 minute
-    // importer/merger jobs and the 15-minute generators; a per-caller read timeout
-    // would need a keyed client cache and the caller's remaining time plumbed
-    // through converse(), which nothing passes today.
+  it('classifies every job Lambda as one the read timeout binds inside, or one it does not', () => {
+    // ONE cached client serves the 30 s API handlers, the 5-10 minute
+    // importer/merger jobs and the 15-minute generators, so "the budget is below
+    // every caller's timeout" is not achievable: a per-caller read timeout needs a
+    // keyed client cache plus the caller's remaining time plumbed through
+    // converse(), which nothing passes today.
     //
-    // What makes one shared budget SAFE for the short callers is a single attempt:
-    // their own timeout binds first, and with no retry behind it nothing is
-    // wasted, which is the whole harm being removed here. The residue — a Lambda
-    // killed at its own ceiling leaves its job row `running` — is a different and
-    // separately documented defect (it covers OOM and every other kill too, so a
-    // read-timeout-shaped fix would only be a partial one).
-    const source = readRepoFile('lambda', 'shared', 'aws.py');
-    const maxAttempts = source.match(/^BEDROCK_MAX_ATTEMPTS:\s*Final\s*=\s*(\d+)/m)?.[1];
+    // Rather than leave that asymmetry as prose, it is enumerated. A job Lambda is
+    // in exactly one band, and a new one — or a timeout change that moves an
+    // existing one across the line — fails here and has to be classified in review
+    // instead of quietly inheriting whichever behaviour it happens to get.
+    //
+    // Band 2 is not a regression introduced by the budget: at the previous 300 x 3
+    // the merger's first read timeout did not surface either, because botocore had
+    // already started attempt 2 when the function was killed. What band 2 costs is
+    // the DIAGNOSIS — the row stays `running` rather than going `failed` — and that
+    // is the separately documented job-timeout defect, whose fix (a remaining-time
+    // guard) covers OOM and every other kill too, so a read-timeout-shaped fix here
+    // would only be a partial one.
+    const budget = bedrockBudgetSeconds();
+    const bands = { bindsInside: [] as string[], killedAtItsOwnCeiling: [] as string[] };
 
-    expect(Number(maxAttempts), 'shared/aws.py must make exactly one Bedrock attempt: more than '
+    for (const fn of jobFunctions()) {
+      const band = budget < fn.timeout - BEDROCK_FAILURE_RECORDING_RESERVE_SECONDS
+        ? 'bindsInside'
+        : 'killedAtItsOwnCeiling';
+      bands[band].push(fn.constructId);
+    }
+
+    expect(bands).toEqual({
+      // 15-minute generations: the read timeout fires first and the job records `failed`.
+      bindsInside: ['PersonaGeneratorJob', 'DocumentGeneratorJob'],
+      // 10- and 5-minute jobs: their own timeout is reached first. Safe because the
+      // budget is ONE attempt, so nothing is spent on a retry that cannot help.
+      killedAtItsOwnCeiling: ['DocumentMergerJob', 'PersonaImporterJob'],
+    });
+  });
+
+  it('never multiplies inside a caller too short for the read timeout to bind', () => {
+    // The property that makes one shared budget safe for band 2 above: a single
+    // attempt, so no caller is ever handed a MULTIPLE of the read timeout. This is
+    // the assertion that fails if someone restores botocore's retries.
+    expect(bedrockMaxAttempts(), 'shared/aws.py must make exactly one Bedrock attempt: more than '
       + 'one makes the budget a MULTIPLE of the read timeout, which is how 300 x 3 came to equal '
       + 'the 900s job ceiling').toBe(1);
   });

@@ -282,22 +282,18 @@ JPEG_SCAN_BYTES = 256 * 1024
 
 MAX_DESCRIPTION_TOKENS = 4096
 
-# This Lambda's Bedrock budget. Deliberately NOT imported from shared/aws.py —
-# this handler is stdlib+boto3 only so CoreStack stays container-free (see the
-# module docstring), the same reason _is_conditional_check_failure is duplicated
-# below. The reasoning is one place, there; only the numbers differ, because they
-# are sized against THIS function's 120 s timeout rather than the 15-minute jobs.
+# This Lambda's Bedrock budget. Same invariant as shared/aws.py's — the two numbers
+# multiply and the product must stay under this function's own timeout — but sized
+# against 120 s rather than the 15-minute jobs, and duplicated rather than imported
+# because this handler is stdlib+boto3 only (see the module docstring), like
+# _is_conditional_check_failure below. The reasoning lives there.
 #
-# botocore's DEFAULTS are wrong here in exactly the way the shared client's old
-# ones were: a 60 s read timeout with the default retry budget can outlast this
-# function's own 120 s ceiling, so the final attempt is always killed in flight —
-# a guaranteed-doomed retry instead of a diagnosis. One attempt, and a read
-# timeout that still leaves time to record the failure. 90 s is also a real
-# widening for a slow description: the default gave up at 60 s.
-#
-# Raising these means re-checking the 120 s timeout in core-stack.ts, which is in
-# turn bounded by product_context.py's EXTRACTION_STALL_SECONDS (300).
-BEDROCK_READ_TIMEOUT_SECONDS = 90
+# botocore's DEFAULTS break that invariant here: 60 s with the default retry budget
+# outlasts 120 s, so the final attempt is always killed in flight. 80 s x 1 leaves
+# time to record the failure, and widens the window for a slow description either
+# way. Raising it means re-checking core-stack.ts's timeout, itself bounded by
+# product_context.py's EXTRACTION_STALL_SECONDS.
+BEDROCK_READ_TIMEOUT_SECONDS = 80
 BEDROCK_MAX_ATTEMPTS = 1
 BEDROCK_CONNECT_TIMEOUT_SECONDS = 10
 

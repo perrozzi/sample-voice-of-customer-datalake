@@ -16,6 +16,10 @@ import { Match, Template } from 'aws-cdk-lib/assertions';
 import { z } from 'zod';
 import { VocCoreStack } from './core-stack';
 import { ALLOWED_MODEL_IDS, MAX_IMAGE_BYTES, MAX_IMAGE_DIMENSION_PX } from '../utils/model-allowlist';
+import {
+  BEDROCK_FAILURE_RECORDING_RESERVE_SECONDS,
+  pythonIntConstant,
+} from '../test-support/cross-language-invariants';
 // The same fixed synth environment and committed feature flags the whole-app
 // harness uses, imported rather than re-declared: a second copy of either drifts
 // silently. Importing costs nothing at module load — synth-app.ts only shells out
@@ -1139,20 +1143,17 @@ describe('VocCoreStack product doc extractor', () => {
     //
     // Read from the handler source because the two numbers that collide live in
     // different languages and different files; nothing else can see both.
-    const source = readFileSync(
-      join(__dirname, '..', '..', 'lambda', 'product_doc_extractor', 'handler.py'),
-      'utf-8',
-    );
-    const readTimeout = source.match(/^BEDROCK_READ_TIMEOUT_SECONDS\s*=\s*(\d+)/m)?.[1];
-    const maxAttempts = source.match(/^BEDROCK_MAX_ATTEMPTS\s*=\s*(\d+)/m)?.[1];
-    expect(readTimeout, 'could not read BEDROCK_READ_TIMEOUT_SECONDS from the handler').toBeDefined();
-    expect(maxAttempts, 'could not read BEDROCK_MAX_ATTEMPTS from the handler').toBeDefined();
-
-    const budget = Number(readTimeout) * Number(maxAttempts);
+    const budget =
+      pythonIntConstant('BEDROCK_READ_TIMEOUT_SECONDS', 'lambda', 'product_doc_extractor', 'handler.py') *
+      pythonIntConstant('BEDROCK_MAX_ATTEMPTS', 'lambda', 'product_doc_extractor', 'handler.py');
     const fn = extractorFunction();
 
+    // The same reserve the shared client's guard requires, for the same reason:
+    // "fits" is not enough, the invocation also has to outlive its own read timeout
+    // long enough to record the failure it hit (`_mark_failed` here). A budget that
+    // merely lands under the ceiling turns a slow description into a silent kill.
     expect(budget, `the extractor waits up to ${budget}s on Bedrock but runs for ${fn.Timeout}s`)
-      .toBeLessThan(fn.Timeout);
+      .toBeLessThan(fn.Timeout - BEDROCK_FAILURE_RECORDING_RESERVE_SECONDS);
   });
 
   it('ships without a bundled layer, so CoreStack stays container-free', () => {
